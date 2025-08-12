@@ -10,7 +10,7 @@ defmodule EmqxMediaRtp.AsrHandler do
   alias Membrane.{RawAudio, Pad}
   alias EmqxMediaRtp.{AliRealtimeAsr}
 
-  @type asr_provider_opts() :: AliRealtimeAsr.asr_provider_opts()
+  @type provider_opts() :: AliRealtimeAsr.provider_opts()
 
   def_input_pad :input,
     accepted_format: %RawAudio{},
@@ -22,7 +22,7 @@ defmodule EmqxMediaRtp.AsrHandler do
         description: "Module that provides ASR functionality"
       ],
       asr_options: [
-        spec: asr_provider_opts(),
+        spec: provider_opts(),
         default: %{},
         description: "Options for the ASR provider"
       ]
