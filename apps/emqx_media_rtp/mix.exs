@@ -26,6 +26,8 @@ defmodule EmqxMediaRtp.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:emqx_rpc, in_umbrella: true},
+      {:langchain, "0.4.0-rc.1"},
       {:mint_web_socket, "~> 1.0"},
       {:membrane_tee_plugin, "~> 0.12" },
       {:membrane_core, "~> 1.2"},

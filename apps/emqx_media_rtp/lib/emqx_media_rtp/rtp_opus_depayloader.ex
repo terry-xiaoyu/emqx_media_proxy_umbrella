@@ -25,7 +25,7 @@ defmodule EmqxMediaRtp.RtpOpusDepayloader do
 
   @impl true
   def handle_pad_added(pad, _ctx, state) do
-    IO.inspect pad, label: "Pad added in ASR Handler"
+    IO.inspect pad, label: "Pad added in RtpOpusDepayloader"
     {[], state}
   end
 

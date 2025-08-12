@@ -1,6 +1,7 @@
 defmodule EmqxMediaRtp.AliRealtimeAsr do
   use GenServer
   require Logger
+  alias EmqxMediaRtp.RtpAgentHandler
 
   @reconnect_delay 5000
 
@@ -19,7 +20,7 @@ defmodule EmqxMediaRtp.AliRealtimeAsr do
   end
 
   def recognize(pid, audio_frame) do
-    GenServer.call(pid, {:recognize, audio_frame})
+    GenServer.call(pid, {:recognize, audio_frame}, :infinity)
   end
 
   # Callbacks
@@ -29,12 +30,14 @@ defmodule EmqxMediaRtp.AliRealtimeAsr do
     state = %{
       bin_buf: <<>>,
       msg_buf: [],
+      asr_results_buf: [],
       ws_data_buf: <<>>,
       audio_frame_buf: <<>>,
       opts: Map.delete(opts, :api_key),
       task_status: :idle,
       task_id: nil,
       reconn_ref: nil,
+      delay_llm_tref: nil,
       connect_ws: connect_ws
     }
     case connect_ws.(state) do
@@ -91,6 +94,16 @@ defmodule EmqxMediaRtp.AliRealtimeAsr do
   end
 
   @impl true
+  def handle_info(:request_llm, %{asr_results_buf: []} = state) do
+    {:noreply, %{state | delay_llm_tref: nil}}
+  end
+
+  def handle_info(:request_llm, %{asr_results_buf: results} = state) do
+    RtpAgentHandler.request_llm(Enum.join(results, " "))
+    {:noreply, %{state | delay_llm_tref: nil, asr_results_buf: []}}
+  end
+
+  @impl true
   def handle_info(:reconnect, %{connect_ws: connect_ws} = state) do
     Logger.info("Reconnecting to ASR service...")
     case connect_ws.(state) do
@@ -109,16 +122,17 @@ defmodule EmqxMediaRtp.AliRealtimeAsr do
   end
 
   @impl true
-  def handle_info(message, %{conn: conn, ws_ref: ref, opts: _opts} = state) do
+  def handle_info(message, %{conn: conn, ws_ref: ref, asr_results_buf: asr_results_buf} = state) do
     with {:ok, conn, [{:data, ^ref, data}]} <- Mint.WebSocket.stream(conn, message),
          {:ok, ws, frames} <- decode_ws_data(state.ws_data_buf <> data, state.ws) do
       state1 = handle_ws_frames(frames, state)
       case handle_service_response(%{state1 | conn: conn, ws: ws}) do
         {results, [], new_state} ->
-          send_asr_results(Enum.reverse(results))
+          RtpAgentHandler.handle_asr_results(Enum.reverse(results))
+          new_state = maybe_request_llm(%{new_state | asr_results_buf: asr_results_buf ++ results})
           {:noreply, %{new_state | msg_buf: [], ws_data_buf: <<>>}}
         {results, errs, new_state} when is_list(errs) ->
-          send_asr_results(Enum.reverse(results))
+          RtpAgentHandler.handle_asr_results(Enum.reverse(results))
           Logger.error("ASR errors: #{inspect(errs)}")
           {:stop, {:shutdown, errs}, %{new_state | msg_buf: [], ws_data_buf: <<>>}}
       end
@@ -150,15 +164,59 @@ defmodule EmqxMediaRtp.AliRealtimeAsr do
     {:noreply, state}
   end
 
-  defp decode_ws_data(data, ws) do
-    Mint.WebSocket.decode(ws, data)
+  @llm_delay 6000
+  defp maybe_request_llm(%{delay_llm_tref: nil} = state) do
+    tref = Process.send_after(self(), :request_llm, @llm_delay)
+    %{state | delay_llm_tref: tref}
   end
 
-  defp send_asr_results(results) when is_list(results) do
-    Enum.each(results, fn text ->
-      IO.puts("ASR Result: #{text}")
-      # Here you can send the result to a process or handle it as needed
-    end)
+  defp maybe_request_llm(%{delay_llm_tref: tref, asr_results_buf: results} = state) do
+    _ = Process.cancel_timer(tref)
+    if results == [] do
+      %{state | delay_llm_tref: nil}
+    else
+      if is_end_mark(List.last(results)) do
+        RtpAgentHandler.request_llm(Enum.join(results, " "))
+        %{state | delay_llm_tref: nil, asr_results_buf: []}
+      else
+        tref = Process.send_after(self(), :request_llm, @llm_delay)
+        %{state | delay_llm_tref: tref}
+      end
+    end
+  end
+
+  defp is_end_mark(text) do
+    is_end_sentence(
+      text
+      |> String.trim()
+      |> String.trim_trailing("?")
+      |> String.trim_trailing("？")
+      |> String.trim_trailing(".")
+      |> String.trim_trailing("。")
+      |> String.trim_trailing("!")
+      |> String.trim_trailing("！")
+      |> String.downcase()
+    )
+  end
+
+  defp is_end_sentence(text) do
+    String.ends_with?(text, "over")
+      or String.ends_with?(text, "that's all")
+      or String.ends_with?(text, "that's it")
+      or String.ends_with?(text, "i'm done")
+      or String.ends_with?(text, "over to you")
+      or String.ends_with?(text, "your turn")
+      or String.ends_with?(text, "结束了")
+      or String.ends_with?(text, "我说完了")
+      or String.ends_with?(text, "你说吧")
+      or String.ends_with?(text, "完毕")
+      or String.ends_with?(text, "结束")
+      or String.ends_with?(text, "完结")
+      or String.ends_with?(text, "完了")
+  end
+
+  defp decode_ws_data(data, ws) do
+    Mint.WebSocket.decode(ws, data)
   end
 
   defp handle_service_response(%{msg_buf: msgs} = state) do

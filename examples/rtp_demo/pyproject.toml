@@ -1,0 +1,11 @@
+[project]
+name = "rtp-demo"
+version = "0.1.0"
+description = "Voice client with MQTT and RTP audio streaming"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "opuslib>=3.0.1",
+    "paho-mqtt>=1.6.1",
+    "pyaudio>=0.2.11",
+]

@@ -30,7 +30,7 @@ defmodule EmqxMediaRtp.AsrHandler do
   @impl true
   def handle_init(_ctx, opts) do
     #:erlang.process_flag(:trap_exit, true)
-    {[], %{opts: opts, provider_pid: nil}}
+    {[], %{opts: opts, provider_pid: nil, ssrc: nil}}
   end
 
   @impl true
@@ -50,17 +50,18 @@ defmodule EmqxMediaRtp.AsrHandler do
   end
 
   @impl true
-  def handle_pad_added(pad, _ctx, state) do
-    IO.inspect pad, label: "Pad added in ASR Handler"
-    {[], state}
+  def handle_pad_added({Pad, :input, ssrc}, _ctx, state) do
+    Logger.info("Pad added for SSRC: #{ssrc}")
+    {[], maybe_save_ssrc(state, ssrc)}
   end
 
   @impl true
   def handle_buffer({Pad, :input, _ref}, buffer, _ctx, %{provider_pid: pid} = state) do
     #IO.puts("Received buffer in ASR Handler, ref: #{inspect(_ref)}")
+    ssrc = buffer.metadata.rtp.ssrc
     :ok = AliRealtimeAsr.recognize(pid, buffer.payload)
     #IO.puts("Recognized text: #{text}")
-    {[], maybe_save_ssrc(state, buffer.metadata.rtp.ssrc)}
+    {[], maybe_save_ssrc(state, ssrc)}
   end
 
   @impl true
@@ -71,8 +72,12 @@ defmodule EmqxMediaRtp.AsrHandler do
 
   defp maybe_save_ssrc(state, ssrc) do
     case state do
-      %{ssrc: _} -> state
-      _ -> state |> Map.put(:ssrc, ssrc)
+      %{ssrc: nil} ->
+        state |> Map.put(:ssrc, ssrc)
+      %{ssrc: ^ssrc} ->
+        state
+      %{ssrc: oldssr} ->
+        throw("SSRC mismatch: expected #{oldssr}, got #{ssrc}")
     end
   end
 end

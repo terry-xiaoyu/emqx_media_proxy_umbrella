@@ -23,7 +23,7 @@ defmodule EmqxMediaProxy.MixProject do
   def application do
     [
       mod: {EmqxMediaProxy.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :gen_rpc]
     ]
   end
 

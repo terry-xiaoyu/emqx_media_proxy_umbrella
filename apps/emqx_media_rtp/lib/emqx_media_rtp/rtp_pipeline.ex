@@ -25,13 +25,13 @@ defmodule EmqxMediaRtp.RtpPipeline do
            local_address: @local_ip
          })
          |> child(:audio_rtp_demuxer, %RTP.Demuxer{srtp: srtp})
-         |> via_out(Pad.ref(:output, :no_ssrc), options: [stream_id: {:encoding_name, :opus}])
-         |> via_in(Pad.ref(:input, :no_ssrc))
-         |> child(:audio_depayloader, EmqxMediaRtp.RtpOpusDepayloader)
-         |> via_in(Pad.ref(:input, :no_ssrc))
-         |> child(:audio_decoder, EmqxMediaRtp.RtpOpusDecoder)
-         |> via_in(Pad.ref(:input, :no_ssrc))
-         |> child(:auto_speech_recognizer, EmqxMediaRtp.AsrHandler)
+        #  |> via_out(Pad.ref(:output, :no_ssrc), options: [stream_id: {:encoding_name, :opus}])
+        #  |> via_in(Pad.ref(:input, :no_ssrc))
+        #  |> child(:audio_depayloader, EmqxMediaRtp.RtpOpusDepayloader)
+        #  |> via_in(Pad.ref(:input, :no_ssrc))
+        #  |> child(:audio_decoder, EmqxMediaRtp.RtpOpusDecoder)
+        #  |> via_in(Pad.ref(:input, :no_ssrc))
+        #  |> child(:auto_speech_recognizer, EmqxMediaRtp.AsrHandler)
        ], stream_sync: :sinks}
     {[spec: spec], %{}}
   end
