@@ -4,21 +4,24 @@ defmodule EmqxMediaRtp.AsrHandler do
   It processes Opus audio packets and converts them to text.
   """
 
-  use Membrane.Sink
+  use Membrane.Filter
 
   require Logger
-  alias Membrane.{RawAudio, Pad}
-  alias EmqxMediaRtp.{AliRealtimeAsr}
+  alias Membrane.{RawAudio, Pad, Buffer}
+  alias EmqxMediaRtp.{AliRealtimeASR}
 
-  @type provider_opts() :: AliRealtimeAsr.provider_opts()
+  @type provider_opts() :: AliRealtimeASR.provider_opts()
 
   def_input_pad :input,
     accepted_format: %RawAudio{},
     availability: :on_request
 
+  def_output_pad :output,
+    accepted_format: _any
+
   def_options asr_provider: [
         spec: module(),
-        default: AliRealtimeAsr,
+        default: AliRealtimeASR,
         description: "Module that provides ASR functionality"
       ],
       asr_options: [
@@ -38,7 +41,7 @@ defmodule EmqxMediaRtp.AsrHandler do
     asr_provider = opts.asr_provider
     asr_options = opts.asr_options
 
-    case asr_provider.start_link(asr_options) do
+    case asr_provider.start_link(self(), asr_options) do
       {:ok, pid} ->
         Logger.debug("ASR provider started successfully: #{inspect(asr_provider)}, PID: #{inspect(pid)}")
         {[], %{state | provider_pid: pid}}
@@ -51,7 +54,7 @@ defmodule EmqxMediaRtp.AsrHandler do
 
   @impl true
   def handle_pad_added({Pad, :input, ssrc}, _ctx, state) do
-    Logger.info("Pad added for SSRC: #{ssrc}")
+    Logger.info("ASR Pad added for SSRC: #{ssrc}")
     {[], maybe_save_ssrc(state, ssrc)}
   end
 
@@ -59,7 +62,7 @@ defmodule EmqxMediaRtp.AsrHandler do
   def handle_buffer({Pad, :input, _ref}, buffer, _ctx, %{provider_pid: pid} = state) do
     #IO.puts("Received buffer in ASR Handler, ref: #{inspect(_ref)}")
     ssrc = buffer.metadata.rtp.ssrc
-    :ok = AliRealtimeAsr.recognize(pid, buffer.payload)
+    :ok = AliRealtimeASR.recognize(pid, buffer.payload)
     #IO.puts("Recognized text: #{text}")
     {[], maybe_save_ssrc(state, ssrc)}
   end
@@ -68,6 +71,27 @@ defmodule EmqxMediaRtp.AsrHandler do
   def handle_end_of_stream(_, _ctx, state) do
     IO.puts("RTP stream terminated, stopping ASR Handler")
     {[terminate: :normal], state}
+  end
+
+  @impl true
+  def handle_info({:llm_response, text}, _ctx, state) do
+    Logger.info("#{inspect(self())}, Received LLM response")
+    { if text == "" do
+        []
+      else
+        [buffer: {:output, %Buffer{payload: text}}]
+      end, state}
+  end
+
+  def handle_info({:llm_complete, _text}, _ctx, state) do
+    Logger.info("#{inspect(self())}, Received LLM complete")
+    {[buffer: {:output, %Buffer{payload: :complete}}], state}
+  end
+
+  @impl true
+  def handle_info(info, _ctx, state) do
+    Logger.warning("Unhandled info message in ASR Handler: #{inspect(info)}")
+    {[], state}
   end
 
   defp maybe_save_ssrc(state, ssrc) do

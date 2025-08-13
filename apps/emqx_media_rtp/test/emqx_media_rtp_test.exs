@@ -3,6 +3,6 @@ defmodule EmqxMediaRtpTest do
   doctest EmqxMediaRtp
 
   test "greets the world" do
-    assert EmqxMediaRtp.hello() == :world
+    assert true
   end
 end

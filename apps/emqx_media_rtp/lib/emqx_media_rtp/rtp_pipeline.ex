@@ -4,6 +4,7 @@ defmodule EmqxMediaRtp.RtpPipeline do
   require Logger
 
   alias Membrane.{Pad, RTP, UDP}
+  alias EmqxMediaRtp.{RtpOpusDepayloader, RtpOpusDecoder, AsrHandler, TtsHandler, TtsUDPSink}
 
   @local_ip {127, 0, 0, 1}
 
@@ -25,15 +26,8 @@ defmodule EmqxMediaRtp.RtpPipeline do
            local_address: @local_ip
          })
          |> child(:audio_rtp_demuxer, %RTP.Demuxer{srtp: srtp})
-        #  |> via_out(Pad.ref(:output, :no_ssrc), options: [stream_id: {:encoding_name, :opus}])
-        #  |> via_in(Pad.ref(:input, :no_ssrc))
-        #  |> child(:audio_depayloader, EmqxMediaRtp.RtpOpusDepayloader)
-        #  |> via_in(Pad.ref(:input, :no_ssrc))
-        #  |> child(:audio_decoder, EmqxMediaRtp.RtpOpusDecoder)
-        #  |> via_in(Pad.ref(:input, :no_ssrc))
-        #  |> child(:auto_speech_recognizer, EmqxMediaRtp.AsrHandler)
        ], stream_sync: :sinks}
-    {[spec: spec], %{}}
+    {[spec: spec], %{audio_port: audio_port}}
   end
 
   @impl true
@@ -41,18 +35,25 @@ defmodule EmqxMediaRtp.RtpPipeline do
     {:new_rtp_stream, %{ssrc: ssrc, payload_type: payload_type, extensions: extensions}},
     :audio_rtp_demuxer,
     _ctx,
-    state
+    %{audio_port: audio_port} = state
   ) do
     IO.puts("New RTP stream detected: SSRC=#{ssrc}, Payload Type=#{payload_type}} Extensions=#{inspect(extensions)}")
     spec = [
       get_child(:audio_rtp_demuxer)
       |> via_out(:output, options: [stream_id: {:ssrc, ssrc}])
       |> via_in(Pad.ref(:input, ssrc))
-      |> child({:audio_depayloader, ssrc}, EmqxMediaRtp.RtpOpusDepayloader)
+      |> child({:audio_depayloader, ssrc}, RtpOpusDepayloader)
       |> via_in(Pad.ref(:input, ssrc))
-      |> child({:audio_decoder, ssrc}, EmqxMediaRtp.RtpOpusDecoder)
+      |> child({:audio_decoder, ssrc}, RtpOpusDecoder)
       |> via_in(Pad.ref(:input, ssrc))
-      |> child(EmqxMediaRtp.AsrHandler)
+      |> child({:asr_handler, ssrc}, AsrHandler)
+      |> via_in(Pad.ref(:input, ssrc))
+      |> child({:tts_handler, ssrc}, TtsHandler)
+      |> via_in(Pad.ref(:input, ssrc))
+      |> child({:audio_sink, ssrc}, %TtsUDPSink{
+        destination_address: @local_ip,
+        destination_port_no: audio_port + 1
+      })
     ]
     {[spec: spec], state}
   end

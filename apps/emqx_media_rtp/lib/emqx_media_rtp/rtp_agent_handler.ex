@@ -3,14 +3,16 @@ defmodule EmqxMediaRtp.RtpAgentHandler do
   This module callbacks the audio/video agents and handles their responses.
   """
 
+  require Logger
   alias LangChain.{Message, MessageDelta}
   alias LangChain.ChatModels.{ChatOpenAI}
   alias LangChain.Chains.LLMChain
   alias LangChain.Utils.ChainResult
 
   def handle_asr_results(results) when is_list(results) do
-    text = Enum.join(results, " ")
-    IO.puts("ASR Result: #{text}")
+    text_outputs = for output <- results, is_map(output), do: output["sentence"]["text"]
+    text = Enum.join(text_outputs, " ")
+    Logger.info("ASR Result: #{text}")
     send_mqtt_message(%{"text" => text})
   end
 
@@ -26,22 +28,23 @@ defmodule EmqxMediaRtp.RtpAgentHandler do
     send_mqtt_message(%{"full_llm" => text})
   end
 
-  def request_llm(text) do
-    IO.puts "Requesting LLM with text: #{text}"
+  def request_llm(parent, text) do
+    Logger.info "Requesting LLM with text: #{text}"
     handler = %{
       on_llm_new_delta: fn _model, data_list ->
         # we received a piece of data
         Enum.each(data_list, fn %MessageDelta{content: content} ->
-          IO.write(content)
+          Logger.info("send to #{inspect(parent)}, delta llm response: #{content}")
           send_mqtt_message(%{"llm" => content})
+          send(parent, {:llm_response, content})
         end)
       end,
       on_message_processed: fn _chain, %Message{} = data ->
         # the message was assembled and is processed
-        IO.puts("")
-        IO.puts("")
-        send_llm_full(data.content |> Enum.reduce(" ", fn msg, acc -> acc <> msg.content end))
-        IO.inspect(data.content, label: "COMPLETED MESSAGE")
+        Logger.info("COMPLETED MESSAGE")
+        full_text = data.content |> Enum.reduce("", fn msg, acc -> acc <> msg.content end)
+        send_llm_full(full_text)
+        send(parent, {:llm_complete, full_text})
       end
     }
     try do
@@ -59,7 +62,7 @@ defmodule EmqxMediaRtp.RtpAgentHandler do
         |> LLMChain.add_message(Message.new_user!(text))
         |> LLMChain.add_callback(handler)
         |> LLMChain.run()
-      IO.puts(ChainResult.to_string!(updated_chain))
+      Logger.info("LLM Chain Result: #{ChainResult.to_string!(updated_chain)}")
     after
       notify_llm_end()
     end

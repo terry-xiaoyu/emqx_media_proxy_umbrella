@@ -66,7 +66,10 @@ config :emqx_media_proxy_web, EmqxMediaProxyWeb.Endpoint,
 config :emqx_media_proxy_web, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
-config :logger, :console, format: "[$level] $message\n"
+config :logger, :console,
+  level: :info,
+  format: "$time [$level] $metadata $message\n",
+  metadata: [:module]
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
