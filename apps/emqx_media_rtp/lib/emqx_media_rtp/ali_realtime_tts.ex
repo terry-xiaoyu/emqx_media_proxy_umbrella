@@ -65,7 +65,13 @@ defmodule EmqxMediaRtp.AliRealtimeTTS do
 
   @impl AliRealtimeWs
   def rws_make_run_task_cmd(task_id, opts) do
-    ## gst-launch-1.0 udpsrc port=5003 ! mpegaudioparse ! mpg123audiodec ! audioconvert ! audioresample ! autoaudiosink
+    ## GStreamer commands to test TTS output:
+    ## [MP3]:
+    ##  gst-launch-1.0 udpsrc port=5003 ! mpegaudioparse ! mpg123audiodec ! audioconvert ! audioresample ! autoaudiosink
+    ## [PCM]:
+    ##  gst-launch-1.0 udpsrc port=5003 caps='audio/x-raw,format=S16LE,channels=1,rate=22050' ! autoaudiosink
+    ## [Receive MP3 and convert to Opus]:
+    ##  gst-launch-1.0 -v udpsrc port=5003 caps="application/x-rtp,media=audio,clock-rate=48000,encoding-name=OPUS" ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! osxaudiosink
     Jason.encode!(
       %{
         "header" => %{
@@ -82,7 +88,7 @@ defmodule EmqxMediaRtp.AliRealtimeTTS do
             "text_type" => "PlainText",
             "voice" => "longxiaochun_v2",
             "format" => "mp3",
-            #"sample_rate" => 22050,
+            "sample_rate" => 8_000,
             "volume" => 50,
             "rate" => 1,
             "pitch" => 1
@@ -102,7 +108,7 @@ defmodule EmqxMediaRtp.AliRealtimeTTS do
       },
       "payload" => %{
         "input" => %{
-          "text" => text
+          "text" => normalize(text)
         }
       }
     })
@@ -120,6 +126,13 @@ defmodule EmqxMediaRtp.AliRealtimeTTS do
         "input" => %{}
       }
     })
+  end
+
+  defp normalize(text) do
+    ## remove line breaks and emojis
+    text
+    |> String.replace(~r/[\r\n\x{1F000}-\x{1F6FF}]/u, " ")
+    |> String.trim()
   end
 
 end

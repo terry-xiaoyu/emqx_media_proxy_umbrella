@@ -7,7 +7,7 @@ defmodule EmqxMediaRtp.RtpOpusDecoder do
 
   require Membrane.Logger
 
-  alias Membrane.{Opus, RemoteStream}
+  alias Membrane.{RTP, Opus, RemoteStream}
   alias Membrane.RawAudio
 
   def_options sample_rate: [
@@ -24,6 +24,7 @@ defmodule EmqxMediaRtp.RtpOpusDecoder do
     availability: :on_request,
     accepted_format:
       any_of(
+        %RTP{payload_format: format} when format in [nil, Opus],
         %Opus{self_delimiting?: false},
         %RemoteStream{type: :packetized, content_format: format} when format in [Opus, nil]
       )

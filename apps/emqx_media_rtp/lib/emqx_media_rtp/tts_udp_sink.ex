@@ -3,6 +3,7 @@ defmodule EmqxMediaRtp.TtsUDPSink do
   Element that sends buffers received on the input pad over a UDP socket.
   """
   use Membrane.Sink
+  require Logger
 
   alias Membrane.{Pad, Buffer}
   alias Membrane.UDP.{CommonSocketBehaviour, Socket}
@@ -74,12 +75,13 @@ defmodule EmqxMediaRtp.TtsUDPSink do
     {[], state}
   end
 
-  @mtu 18000
+  @mtu 8500
   @impl true
   def handle_buffer({Pad, :input, _ssrc}, %Buffer{payload: payload}, _context, state) do
     %{dst_socket: dst_socket, local_socket: local_socket} = state
     if byte_size(payload) > @mtu do
-      raise "Payload size exceeds MTU: #{byte_size(payload)} > #{@mtu}"
+      Logger.warning("Payload size exceeds MTU: #{byte_size(payload)} > #{@mtu}, partitioning payload")
+      send_packets_in_chunks(payload, dst_socket, local_socket)
     else
       :ok = Socket.send(dst_socket, local_socket, payload)
     end
@@ -89,4 +91,12 @@ defmodule EmqxMediaRtp.TtsUDPSink do
   @impl true
   defdelegate handle_setup(context, state), to: CommonSocketBehaviour
 
+  defp send_packets_in_chunks(<<part1::binary-size(@mtu), rem::binary>>, dst_socket, local_socket) do
+    :ok = Socket.send(dst_socket, local_socket, part1)
+    send_packets_in_chunks(rem, dst_socket, local_socket)
+  end
+  defp send_packets_in_chunks(<<>>, _dst_socket, _local_socket), do: :ok
+  defp send_packets_in_chunks(payload, dst_socket, local_socket) do
+    :ok = Socket.send(dst_socket, local_socket, payload)
+  end
 end

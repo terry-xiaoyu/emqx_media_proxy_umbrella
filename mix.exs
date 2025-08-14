@@ -26,7 +26,8 @@ defmodule EmqxMediaProxy.Umbrella.MixProject do
   defp deps do
     [
       # Required to run "mix format" on ~H/.heex files from the umbrella root
-      {:phoenix_live_view, ">= 0.0.0"}
+      {:phoenix_live_view, ">= 0.0.0"},
+      {:observer_cli, "~> 1.8"}
     ]
   end
 

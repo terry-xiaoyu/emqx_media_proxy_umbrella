@@ -7,7 +7,7 @@ defmodule EmqxMediaRtp.TtsHandler do
   use Membrane.Filter
 
   require Logger
-  alias Membrane.{Buffer, Pad}
+  alias Membrane.{RemoteStream, Buffer, Pad}
   alias EmqxMediaRtp.{AliRealtimeTTS}
 
   @type provider_opts() :: AliRealtimeTTS.provider_opts()
@@ -17,7 +17,7 @@ defmodule EmqxMediaRtp.TtsHandler do
     availability: :on_request
 
   def_output_pad :output,
-    accepted_format: _any
+    accepted_format: %RemoteStream{content_format: MPEG}
 
   def_options asr_provider: [
         spec: module(),
@@ -26,14 +26,20 @@ defmodule EmqxMediaRtp.TtsHandler do
       ],
       asr_options: [
         spec: provider_opts(),
-        default: %{},
+        default: %{id: nil},
         description: "Options for the TTS provider"
       ]
 
   @impl true
-  def handle_init(_ctx, opts) do
+  def handle_init(ctx, opts) do
+    Logger.info("Initializing TTS Handler with options: #{inspect(opts)}, context: #{inspect(ctx)}")
     #:erlang.process_flag(:trap_exit, true)
     {[], %{opts: opts, provider_pid: nil, ssrc: nil}}
+  end
+
+  @impl true
+  def handle_stream_format(Pad.ref(:input, _ssrc), _stream_format, _ctx, state) do
+    {[stream_format: {:output, %RemoteStream{content_format: MPEG}}], state}
   end
 
   @impl true
@@ -59,8 +65,7 @@ defmodule EmqxMediaRtp.TtsHandler do
   end
 
   @impl true
-  def handle_buffer({Pad, :input, ref}, %Buffer{payload: payload}, _ctx, %{provider_pid: pid} = state) do
-    Logger.info("Received buffer in TTS Handler, ref: #{inspect(ref)}, payload: #{inspect(payload)}")
+  def handle_buffer({Pad, :input, _ref}, %Buffer{payload: payload}, _ctx, %{provider_pid: pid} = state) do
     if payload == :complete do
       Logger.debug("Received complete signal in TTS Handler, finishing task")
       :ok = AliRealtimeTTS.finish(pid)

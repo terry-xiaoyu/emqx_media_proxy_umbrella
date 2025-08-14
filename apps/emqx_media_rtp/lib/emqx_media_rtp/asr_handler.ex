@@ -26,7 +26,7 @@ defmodule EmqxMediaRtp.AsrHandler do
       ],
       asr_options: [
         spec: provider_opts(),
-        default: %{},
+        default: %{id: nil},
         description: "Options for the ASR provider"
       ]
 
@@ -60,7 +60,7 @@ defmodule EmqxMediaRtp.AsrHandler do
 
   @impl true
   def handle_buffer({Pad, :input, _ref}, buffer, _ctx, %{provider_pid: pid} = state) do
-    #IO.puts("Received buffer in ASR Handler, ref: #{inspect(_ref)}")
+    #Logger.info("Received buffer in ASR Handler, SSRC: #{inspect(buffer)}")
     ssrc = buffer.metadata.rtp.ssrc
     :ok = AliRealtimeASR.recognize(pid, buffer.payload)
     #IO.puts("Recognized text: #{text}")

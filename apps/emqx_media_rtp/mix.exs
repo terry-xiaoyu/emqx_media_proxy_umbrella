@@ -37,12 +37,13 @@ defmodule EmqxMediaRtp.MixProject do
       {:membrane_h26x_plugin, "~> 0.10"},
       {:membrane_rtp_h264_plugin, "~> 0.20"},
       {:membrane_opus_plugin, "~> 0.20"},
-      #{:membrane_ogg_plugin, "~> 0.5"},
       {:membrane_rtp_opus_plugin, "~> 0.10"},
       {:membrane_sdl_plugin, "~> 0.18.2"},
       {:membrane_portaudio_plugin, "~> 0.19"},
       {:membrane_file_plugin, "~> 0.17"},
       {:membrane_realtimer_plugin, "~> 0.10"},
+      {:membrane_mp3_mad_plugin, "~> 0.18"},
+      {:membrane_ffmpeg_swresample_plugin, "~> 0.20"},
       {:ex_libsrtp, "~> 0.7"}
     ]
   end

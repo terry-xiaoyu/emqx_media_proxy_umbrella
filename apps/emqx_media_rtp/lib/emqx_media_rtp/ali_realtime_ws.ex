@@ -8,6 +8,7 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
     optional(:ws_endpoint) => String.t(),
     optional(:api_key) => String.t(),
     optional(:model) => String.t(),
+    :id => String.t(),
     atom() => any()
   }
   @type input_type() :: :text | :binary
@@ -30,8 +31,10 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
   def start_link(mod, input_type, opts) do
     api_key = Map.get(opts, :api_key, System.get_env("DASHSCOPE_API_KEY"))
     ep = Map.get(opts, :ws_endpoint, "wss://dashscope.aliyuncs.com/api-ws/v1/inference")
+    id = Map.get(opts, :id)
     GenServer.start_link(__MODULE__, {
       %{
+        id: id,
         mod: mod,
         input_type: input_type,
         api_key: api_key,
@@ -47,7 +50,8 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
 
   # Callbacks
   @impl true
-  def init({%{mod: mod, input_type: input_type, parsed_uri: parsed_uri, api_key: api_key}, opts}) do
+  def init({%{id: id, mod: mod, input_type: input_type, parsed_uri: parsed_uri, api_key: api_key}, opts}) do
+    :proc_lib.set_label({mod, id})
     connect_ws = fn(state) -> connect_ws(parsed_uri, api_key, state) end
     state = %{
       mod: mod,
@@ -94,8 +98,8 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
   @impl true
   def handle_call(:send_finish_task_cmd, _from, %{task_status: :started, task_id: task_id, mod: mod, input_buf: input_buf, ws_ref: ref, input_type: input_type} = state) do
     finish_cmd = mod.rws_make_finish_task_cmd(task_id, state)
-    with {:ok, conn, ws} <- do_handle_input(input_buf, state.conn, state.ws, ref, input_type),
-         {:ok, conn, ws} <- do_handle_input([finish_cmd], conn, ws, ref, input_type) do
+    with {:ok, conn, ws} <- do_handle_input(input_buf, state.conn, state.ws, ref, input_type, <<>>),
+         {:ok, conn, ws} <- do_handle_input([finish_cmd], conn, ws, ref, input_type, <<>>) do
       {:reply, :ok, %{state | conn: conn, ws: ws, task_status: :connected, input_buf: []}}
     end
   end
@@ -105,22 +109,43 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
   end
 
   @impl true
-  def handle_cast({:input, input_frag} = request, %{task_status: :connected} = state) do
+  def handle_cast({:input, _} = request, %{task_status: :connected} = state) do
     {:ok, state} = run_task(state)
-    handle_input(state |> cb_handle_call(request) |> buffer_input(input_frag))
+    handle_input(aggreate_input(state, request))
   end
 
-  def handle_cast({:input, input_frag} = request, %{task_status: :started} = state) do
-    handle_input(state |> cb_handle_call(request) |> buffer_input(input_frag))
+  def handle_cast({:input, _} = request, %{task_status: :started} = state) do
+    handle_input(aggreate_input(state, request))
   end
 
-  def handle_cast({:input, input_frag} = request, %{task_status: status} = state) do
+  def handle_cast({:input, _} = request, %{task_status: status} = state) do
     Logger.warning("#{state.mod} - Task is not ready, current status: #{status}, buffering input")
-    {:noreply, state |> cb_handle_call(request) |> buffer_input(input_frag)}
+    {:noreply, aggreate_input(state, request)}
   end
 
   def handle_cast(request, %{mod: mod} = state) do
     {:noreply, mod.rws_handle_cast(request, state)}
+  end
+
+  defp aggreate_input(state, request) do
+    state |> callbk_and_buffer(request) |> do_aggreate_input()
+  end
+
+  defp do_aggreate_input(state) do
+    receive do
+      {:"$gen_cast", {:input, _} = request} ->
+          state
+          |> callbk_and_buffer(request)
+          |> do_aggreate_input()
+    after 0 ->
+        state
+    end
+  end
+
+  defp callbk_and_buffer(state, {:input, input_frag} = request) do
+    state
+    |> cb_handle_call(request)
+    |> buffer_input(input_frag)
   end
 
   @impl true
@@ -188,7 +213,7 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
   end
 
   defp handle_input(%{conn: conn, ws: ws, ws_ref: ref, input_buf: input_buf, input_type: input_type} = state) do
-    case do_handle_input(input_buf, conn, ws, ref, input_type) do
+    case do_handle_input(input_buf, conn, ws, ref, input_type, <<>>) do
       {:ok, conn, ws} ->
         {:noreply, %{state | conn: conn, ws: ws, input_buf: []}}
       {:error, _, reason} ->
@@ -197,18 +222,34 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
     end
   end
 
-  defp do_handle_input([], conn, ws, _ref, _) do
+  @batch_byte_size 100 * 1024
+
+  defp do_handle_input([], conn, ws, ref, input_type, batch) do
+    send_input_batch(batch, input_type, conn, ws, ref)
+  end
+
+  defp do_handle_input([input | input_buf], conn, ws, ref, input_type, batch) do
+    if input_type == :binary and (byte_size(batch) + byte_size(input)) < @batch_byte_size do
+        do_handle_input(input_buf, conn, ws, ref, input_type, <<batch::binary, input::binary>>)
+    else
+        case send_input_batch(batch, input_type, conn, ws, ref) do
+          {:ok, conn, ws} ->
+            #IO.puts("Sent batch: #{inspect(batch)}")
+            do_handle_input(input_buf, conn, ws, ref, input_type, input)
+          {:error, _, _} = err ->
+            err
+        end
+    end
+  end
+
+  defp send_input_batch(<<>>, _, conn, ws, _ref) do
     {:ok, conn, ws}
   end
 
-  defp do_handle_input([input | input_buf], conn, ws, ref, input_type) do
-    {:ok, ws, data} = Mint.WebSocket.encode(ws, {input_type, input})
-    case Mint.WebSocket.stream_request_body(conn, ref, data) do
-      {:ok, conn} ->
-        #IO.puts("Sent input: #{inspect(input)}")
-        do_handle_input(input_buf, conn, ws, ref, input_type)
-      {:error, _, _} = err ->
-        err
+  defp send_input_batch(batch, input_type, conn, ws, ref) do
+    with {:ok, ws, data} <- Mint.WebSocket.encode(ws, {input_type, batch}),
+         {:ok, conn} <- Mint.WebSocket.stream_request_body(conn, ref, data) do
+      {:ok, conn, ws}
     end
   end
 
@@ -226,22 +267,28 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
     end)
   end
 
+  defmacrop nil_equal(val1, val2) do
+    quote do
+      unquote(val1) == nil or unquote(val1) == unquote(val2)
+    end
+  end
+
   defp do_handle_service_response("", state) do
     {:ok, state}
   end
 
-  defp do_handle_service_response(txt, %{task_id: task_id, mod: mod} = state) do
+  defp do_handle_service_response(txt, %{task_id: task_id0, mod: mod} = state) do
     case Jason.decode(txt) do
-      {:ok, %{"header" => %{"event" => "task-started", "task_id" => ^task_id}}} ->
+      {:ok, %{"header" => %{"event" => "task-started", "task_id" => task_id}}} when nil_equal(task_id0, task_id) ->
         Logger.info("#{mod} - Task started with ID: #{task_id}")
         {:ok, %{state | task_status: :started}}
-      {:ok, %{"header" => %{"event" => "task-finished", "task_id" => ^task_id}}} ->
+      {:ok, %{"header" => %{"event" => "task-finished", "task_id" => task_id}}} when nil_equal(task_id0, task_id) ->
         Logger.warning("#{mod} - Task finished with ID: #{task_id}")
         {:ok, %{state | task_status: :connected}}
-      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => ^task_id, "error_code" => "ResponseTimeout", "error_message" => error_message}}} ->
+      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id, "error_code" => "ResponseTimeout", "error_message" => error_message}}} when nil_equal(task_id0, task_id) ->
         Logger.info("#{mod} - Task timed out with ID: #{task_id}, error: #{inspect(error_message)}")
         {:ok, %{state| task_status: :connected, task_id: nil}}
-      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => ^task_id} = header}} ->
+      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id} = header}} when nil_equal(task_id0, task_id) ->
         error_code = Map.get(header, "error_code", nil)
         error_message = Map.get(header, "error_message", nil)
         Logger.error("#{mod} - Task failed with error code #{error_code}: #{error_message}")
@@ -255,6 +302,9 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
           Logger.warning("#{mod} - Result generated but no payload found")
           {:ok, state}
         end
+      {:ok, %{"header" => %{"task_id" => task_id} = header}} when task_id0 and task_id != task_id0 ->
+        Logger.error("#{mod} - Received unknown task, current task_id: #{task_id0}, header: #{inspect(header)}")
+        {:error, :task_failed, %{state| task_status: :connected, task_id: nil}}
       {:ok, invalid_cmd} ->
         Logger.error("#{mod} - Received invalid command: #{inspect(invalid_cmd)}")
         {:ok, state}

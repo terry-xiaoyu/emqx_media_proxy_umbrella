@@ -3,8 +3,12 @@ defmodule EmqxMediaRtp.RtpPipeline do
 
   require Logger
 
-  alias Membrane.{Pad, RTP, UDP}
-  alias EmqxMediaRtp.{RtpOpusDepayloader, RtpOpusDecoder, AsrHandler, TtsHandler, TtsUDPSink}
+  alias Membrane.FFmpeg.SWResample.Converter
+  alias Membrane.{RawAudio, Pad, RTP, UDP}
+  alias Membrane.MP3.MAD
+  alias EmqxMediaRtp.{RtpOpusDecoder, AsrHandler, TtsHandler, RtpOpusEncoder}
+
+  @sample_rate 8_000
 
   @local_ip {127, 0, 0, 1}
 
@@ -27,7 +31,7 @@ defmodule EmqxMediaRtp.RtpPipeline do
          })
          |> child(:audio_rtp_demuxer, %RTP.Demuxer{srtp: srtp})
        ], stream_sync: :sinks}
-    {[spec: spec], %{audio_port: audio_port}}
+    {[spec: spec], %{audio_port: audio_port, srtp: srtp}}
   end
 
   @impl true
@@ -35,22 +39,41 @@ defmodule EmqxMediaRtp.RtpPipeline do
     {:new_rtp_stream, %{ssrc: ssrc, payload_type: payload_type, extensions: extensions}},
     :audio_rtp_demuxer,
     _ctx,
-    %{audio_port: audio_port} = state
+    %{audio_port: audio_port, srtp: srtp} = state
   ) do
     IO.puts("New RTP stream detected: SSRC=#{ssrc}, Payload Type=#{payload_type}} Extensions=#{inspect(extensions)}")
     spec = [
       get_child(:audio_rtp_demuxer)
       |> via_out(:output, options: [stream_id: {:ssrc, ssrc}])
       |> via_in(Pad.ref(:input, ssrc))
-      |> child({:audio_depayloader, ssrc}, RtpOpusDepayloader)
-      |> via_in(Pad.ref(:input, ssrc))
       |> child({:audio_decoder, ssrc}, RtpOpusDecoder)
       |> via_in(Pad.ref(:input, ssrc))
-      |> child({:asr_handler, ssrc}, AsrHandler)
+      |> child({:asr_handler, ssrc}, %AsrHandler{
+        asr_provider: EmqxMediaRtp.AliRealtimeASR,
+        asr_options: %{id: ssrc}
+      })
       |> via_in(Pad.ref(:input, ssrc))
-      |> child({:tts_handler, ssrc}, TtsHandler)
-      |> via_in(Pad.ref(:input, ssrc))
-      |> child({:audio_sink, ssrc}, %TtsUDPSink{
+      |> child({:tts_handler, ssrc}, %TtsHandler{
+        asr_provider: EmqxMediaRtp.AliRealtimeTTS,
+        asr_options: %{id: ssrc}
+      })
+      |> child({:mp3_decoder, ssrc}, MAD.Decoder)
+      |> child({:converter, ssrc}, %Converter{
+        input_stream_format: %RawAudio{channels: 1, sample_format: :s24le, sample_rate: @sample_rate},
+        output_stream_format: %RawAudio{channels: 1, sample_format: :s16le, sample_rate: @sample_rate}
+      })
+      |> child({:opus_encoder, ssrc}, %RtpOpusEncoder{
+        application: :audio,
+        input_stream_format: %RawAudio{
+          channels: 1,
+          sample_format: :s16le,
+          sample_rate: @sample_rate
+        }
+      })
+      |> child({:audio_payloader, ssrc}, RTP.Opus.Payloader)
+      |> child({:audio_rtp_muxer, ssrc}, %RTP.Muxer{srtp: srtp})
+      #|> child({:audio_realtimer, ssrc}, Membrane.Realtimer)
+      |> child({:audio_sink, ssrc}, %UDP.Sink{
         destination_address: @local_ip,
         destination_port_no: audio_port + 1
       })
