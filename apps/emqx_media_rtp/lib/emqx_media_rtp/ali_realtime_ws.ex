@@ -162,7 +162,7 @@ defmodule EmqxMediaRtp.AliRealtimeWs do
   def handle_info({closed, _}, state) when closed == :ssl_closed or closed == :tcp_closed do
     Logger.warning("#{state.mod} - Connection closed")
     state = schedule_reconnect(state)
-    {:noreply, %{state | task_status: :idle, task_id: nil, conn: nil, ws: nil}}
+    {:noreply, %{state | task_status: :idle, task_id: nil}}
   end
 
   def handle_info(
