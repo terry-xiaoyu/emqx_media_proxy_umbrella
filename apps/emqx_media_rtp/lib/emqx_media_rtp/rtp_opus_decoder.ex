@@ -24,7 +24,7 @@ defmodule EmqxMediaRtp.RtpOpusDecoder do
     availability: :on_request,
     accepted_format:
       any_of(
-        %RTP{payload_format: format} when format in [nil, Opus],
+        %RTP{},
         %Opus{self_delimiting?: false},
         %RemoteStream{type: :packetized, content_format: format} when format in [Opus, nil]
       )

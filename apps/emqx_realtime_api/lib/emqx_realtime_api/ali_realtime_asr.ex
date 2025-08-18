@@ -1,6 +1,6 @@
-defmodule EmqxMediaRtp.AliRealtimeASR do
+defmodule EmqxRealtimeApi.AliRealtimeASR do
   require Logger
-  alias EmqxMediaRtp.{AliRealtimeWs, RtpAgentHandler}
+  alias EmqxRealtimeApi.{AliRealtimeWs, AiAgentHandler}
 
   @behaviour AliRealtimeWs
 
@@ -47,19 +47,9 @@ defmodule EmqxMediaRtp.AliRealtimeASR do
   end
 
   def rws_handle_info(:request_llm, %{asr_results_buf: results} = state) do
-    RtpAgentHandler.request_llm(state.opts.parent, Enum.join(results, " "))
+    AiAgentHandler.request_llm(state.opts.parent, Enum.join(results, " "))
     %{state | delay_llm_tref: nil, asr_results_buf: []}
   end
-
-  # def rws_handle_info({:llm_response, text}, %{opts: %{parent: parent}} = state) do
-  #   send(parent, {:llm_response, text})
-  #   state
-  # end
-
-  # def rws_handle_info({:llm_complete, text}, %{opts: %{parent: parent}} = state) do
-  #   send(parent, {:llm_complete, text})
-  #   state
-  # end
 
   def rws_handle_info(info, state) do
     Logger.warning("Unhandled info message: #{inspect(info)}")
@@ -72,7 +62,7 @@ defmodule EmqxMediaRtp.AliRealtimeASR do
   end
 
   def rws_handle_outputs(%{asr_results_buf: asr_results_buf, asr_results_last_ts: asr_results_last_ts} = state, outputs) do
-    RtpAgentHandler.handle_asr_results(outputs)
+    AiAgentHandler.handle_asr_results(outputs)
     {asr_buf, last_ts} = merge_asr_results(asr_results_buf, asr_results_last_ts, outputs)
     maybe_request_llm(%{state | asr_results_buf: asr_buf, asr_results_last_ts: last_ts})
   end
@@ -129,7 +119,7 @@ defmodule EmqxMediaRtp.AliRealtimeASR do
       %{state | delay_llm_tref: nil}
     else
       if is_end_mark(List.last(results)) do
-        RtpAgentHandler.request_llm(state.opts.parent, Enum.join(results, " "))
+        AiAgentHandler.request_llm(state.opts.parent, Enum.join(results, " "))
         %{state | delay_llm_tref: nil, asr_results_buf: []}
       else
         tref = Process.send_after(self(), :request_llm, @llm_delay)

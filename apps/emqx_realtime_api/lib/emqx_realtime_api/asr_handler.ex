@@ -1,4 +1,4 @@
-defmodule EmqxMediaRtp.AsrHandler do
+defmodule EmqxRealtimeApi.AsrHandler do
   @moduledoc """
   This module forwards RTP audio streams to the Automatic Speech Recognition (ASR) service.
   It processes Opus audio packets and converts them to text.
@@ -19,12 +19,12 @@ defmodule EmqxMediaRtp.AsrHandler do
   def_output_pad :output,
     accepted_format: _any
 
-  def_options asr_provider: [
+  def_options provider: [
         spec: module(),
         default: AliRealtimeASR,
         description: "Module that provides ASR functionality"
       ],
-      asr_options: [
+      provider_opts: [
         spec: provider_opts(),
         default: %{id: nil},
         description: "Options for the ASR provider"
@@ -33,17 +33,17 @@ defmodule EmqxMediaRtp.AsrHandler do
   @impl true
   def handle_init(_ctx, opts) do
     #:erlang.process_flag(:trap_exit, true)
-    {[], %{opts: opts, provider_pid: nil, ssrc: nil}}
+    {[], %{opts: opts, provider_pid: nil, ssrc: nil, provider: opts.provider}}
   end
 
   @impl true
   def handle_setup(_ctx, %{opts: opts} = state) do
-    asr_provider = opts.asr_provider
-    asr_options = opts.asr_options
+    provider = opts.provider
+    provider_opts = opts.provider_opts
 
-    case asr_provider.start_link(self(), asr_options) do
+    case provider.start_link(self(), provider_opts) do
       {:ok, pid} ->
-        Logger.debug("ASR provider started successfully: #{inspect(asr_provider)}, PID: #{inspect(pid)}")
+        Logger.debug("ASR provider started successfully: #{inspect(provider)}, PID: #{inspect(pid)}")
         {[], %{state | provider_pid: pid}}
 
       {:error, reason} ->
@@ -59,10 +59,10 @@ defmodule EmqxMediaRtp.AsrHandler do
   end
 
   @impl true
-  def handle_buffer({Pad, :input, _ref}, buffer, _ctx, %{provider_pid: pid} = state) do
+  def handle_buffer({Pad, :input, _ref}, buffer, _ctx, %{provider_pid: pid, provider: provider} = state) do
     #Logger.info("Received buffer in ASR Handler, SSRC: #{inspect(buffer)}")
     ssrc = buffer.metadata.rtp.ssrc
-    :ok = AliRealtimeASR.recognize(pid, buffer.payload)
+    :ok = provider.recognize(pid, buffer.payload)
     #IO.puts("Recognized text: #{text}")
     {[], maybe_save_ssrc(state, ssrc)}
   end

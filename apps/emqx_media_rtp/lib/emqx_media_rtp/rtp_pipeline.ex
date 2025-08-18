@@ -6,7 +6,8 @@ defmodule EmqxMediaRtp.RtpPipeline do
   alias Membrane.FFmpeg.SWResample.Converter
   alias Membrane.{RawAudio, Pad, RTP, UDP}
   alias Membrane.MP3.MAD
-  alias EmqxMediaRtp.{RtpOpusDecoder, AsrHandler, TtsHandler, RtpOpusEncoder}
+  alias EmqxMediaRtp.{RtpOpusDecoder, RtpOpusEncoder}
+  alias EmqxRealtimeApi.{AsrHandler, TtsHandler, AliRealtimeASR, AliRealtimeTTS}
 
   @sample_rate 8_000
 
@@ -49,13 +50,13 @@ defmodule EmqxMediaRtp.RtpPipeline do
       |> child({:audio_decoder, ssrc}, RtpOpusDecoder)
       |> via_in(Pad.ref(:input, ssrc))
       |> child({:asr_handler, ssrc}, %AsrHandler{
-        asr_provider: EmqxMediaRtp.AliRealtimeASR,
-        asr_options: %{id: ssrc}
+        provider: AliRealtimeASR,
+        provider_opts: %{id: ssrc}
       })
       |> via_in(Pad.ref(:input, ssrc))
       |> child({:tts_handler, ssrc}, %TtsHandler{
-        asr_provider: EmqxMediaRtp.AliRealtimeTTS,
-        asr_options: %{id: ssrc}
+        provider: AliRealtimeTTS,
+        provider_opts: %{id: ssrc}
       })
       |> child({:mp3_decoder, ssrc}, MAD.Decoder)
       |> child({:converter, ssrc}, %Converter{

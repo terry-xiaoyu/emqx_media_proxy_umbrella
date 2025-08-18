@@ -1,6 +1,6 @@
-defmodule EmqxMediaRtp.AliRealtimeTTS do
+defmodule EmqxRealtimeApi.AliRealtimeTTS do
   require Logger
-  alias EmqxMediaRtp.{AliRealtimeWs}
+  alias EmqxRealtimeApi.{AliRealtimeWs}
 
   @behaviour AliRealtimeWs
 
@@ -87,7 +87,7 @@ defmodule EmqxMediaRtp.AliRealtimeTTS do
           "parameters" => %{
             "text_type" => "PlainText",
             "voice" => "longxiaochun_v2",
-            "format" => "mp3",
+            "format" => "pcm",
             "sample_rate" => 8_000,
             "volume" => 50,
             "rate" => 1,

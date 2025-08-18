@@ -1,4 +1,4 @@
-defmodule EmqxMediaRtp.AliRealtimeWs do
+defmodule EmqxRealtimeApi.AliRealtimeWs do
   use GenServer
   require Logger
 

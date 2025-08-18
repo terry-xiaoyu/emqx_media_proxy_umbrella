@@ -18,6 +18,7 @@ defmodule EmqxMediaProxyWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    get "/webrtc", WebRTCController, :home
   end
 
   # Other scopes may use custom stacks.

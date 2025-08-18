@@ -1,4 +1,4 @@
-defmodule EmqxMediaRtp.RtpAgentHandler do
+defmodule EmqxRealtimeApi.AiAgentHandler do
   @moduledoc """
   This module callbacks the audio/video agents and handles their responses.
   """

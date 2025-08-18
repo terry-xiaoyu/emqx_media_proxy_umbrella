@@ -1,4 +1,4 @@
-defmodule EmqxMediaRtp.TtsHandler do
+defmodule EmqxRealtimeApi.TtsHandler do
   @moduledoc """
   This module forwards RTP audio streams to the Automatic Speech Recognition (TTS) service.
   It processes Opus audio packets and converts them to text.
@@ -19,12 +19,12 @@ defmodule EmqxMediaRtp.TtsHandler do
   def_output_pad :output,
     accepted_format: %RemoteStream{content_format: MPEG}
 
-  def_options asr_provider: [
+  def_options provider: [
         spec: module(),
         default: AliRealtimeTTS,
         description: "Module that provides TTS functionality"
       ],
-      asr_options: [
+      provider_opts: [
         spec: provider_opts(),
         default: %{id: nil},
         description: "Options for the TTS provider"
@@ -34,7 +34,7 @@ defmodule EmqxMediaRtp.TtsHandler do
   def handle_init(ctx, opts) do
     Logger.info("Initializing TTS Handler with options: #{inspect(opts)}, context: #{inspect(ctx)}")
     #:erlang.process_flag(:trap_exit, true)
-    {[], %{opts: opts, provider_pid: nil, ssrc: nil}}
+    {[], %{opts: opts, provider_pid: nil, ssrc: nil, provider: opts.provider}}
   end
 
   @impl true
@@ -44,12 +44,12 @@ defmodule EmqxMediaRtp.TtsHandler do
 
   @impl true
   def handle_setup(_ctx, %{opts: opts} = state) do
-    asr_provider = opts.asr_provider
-    asr_options = opts.asr_options
+    provider = opts.provider
+    provider_opts = opts.provider_opts
 
-    case asr_provider.start_link(self(), asr_options) do
+    case provider.start_link(self(), provider_opts) do
       {:ok, pid} ->
-        Logger.debug("TTS provider started successfully: #{inspect(asr_provider)}, PID: #{inspect(pid)}")
+        Logger.debug("TTS provider started successfully: #{inspect(provider)}, PID: #{inspect(pid)}")
         {[], %{state | provider_pid: pid}}
 
       {:error, reason} ->
@@ -65,12 +65,12 @@ defmodule EmqxMediaRtp.TtsHandler do
   end
 
   @impl true
-  def handle_buffer({Pad, :input, _ref}, %Buffer{payload: payload}, _ctx, %{provider_pid: pid} = state) do
+  def handle_buffer({Pad, :input, _ref}, %Buffer{payload: payload}, _ctx, %{provider_pid: pid, provider: provider} = state) do
     if payload == :complete do
       Logger.debug("Received complete signal in TTS Handler, finishing task")
-      :ok = AliRealtimeTTS.finish(pid)
+      :ok = provider.finish(pid)
     else
-      :ok = AliRealtimeTTS.tts(pid, payload)
+      :ok = provider.tts(pid, payload)
     end
     #Logger.debug("Recognized text: #{text}")
     {[], state}
