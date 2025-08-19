@@ -88,7 +88,7 @@ defmodule EmqxRealtimeApi.AliRealtimeASR do
           "model" => Map.get(opts, :model, "paraformer-realtime-v2"),
           "parameters" => %{
             "format" => "wav",
-            "sample_rate" => 48000,
+            "sample_rate" => Map.get(opts, :sample_rate, 48_000),
             "disfluency_removal_enabled" => false
           },
           "resources" => [],

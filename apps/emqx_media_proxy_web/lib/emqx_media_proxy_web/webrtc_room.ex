@@ -20,12 +20,12 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
 
   @channels 2
   @sample_rate 48_000
-  @clock_rate 90_000
+  @tts_sample_rate 8_000
   @video_codecs [
     %RTPCodecParameters{
       payload_type: 96,
       mime_type: "video/VP8",
-      clock_rate: @clock_rate
+      clock_rate: 90_000
     }
   ]
 
@@ -33,7 +33,7 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
     %RTPCodecParameters{
       payload_type: 111,
       mime_type: "audio/opus",
-      clock_rate: @clock_rate,
+      clock_rate: @sample_rate,
       channels: @channels
     }
   ]
@@ -77,11 +77,12 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
       nil ->
         {:noreply, assign(socket, opus_encoder_state: opus_encoder_state)}
       {:output, buffer} ->
+        pad = Pad.ref(:input, in_audio_track_id)
         {actions, rtp_muxer_state} = Membrane.RTP.Muxer.handle_buffer(
-          Pad.ref(:input, in_audio_track_id), buffer, nil, socket.assigns.rtp_muxer_state)
-        {:output, buffer} = actions[:buffer]
-        #IO.puts("Decoded audio opus_packet of size: #{byte_size(payload)}")
-        :ok = PeerConnection.send_rtp(pc, out_audio_track_id, buffer.payload)
+          pad, buffer, nil, socket.assigns.rtp_muxer_state)
+        {:output, %Buffer{payload: payload, metadata: %{rtp: rtp_packet}}} = actions[:buffer]
+        IO.puts("Sending RTP packet with payload: #{inspect(rtp_packet)}")
+        :ok = PeerConnection.send_rtp(pc, out_audio_track_id, %{rtp_packet | payload: payload})
         {:noreply, assign(socket, [
           opus_encoder_state: opus_encoder_state,
           rtp_muxer_state: rtp_muxer_state
@@ -187,7 +188,7 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
         {:noreply, assign(socket, :in_video_track_id, id)}
       :audio ->
         with {:ok, asr_pid} <- AliRealtimeASR.start_link(self(), %{id: id}),
-             {:ok, tts_pid} <- AliRealtimeTTS.start_link(self(), %{id: id}) do
+             {:ok, tts_pid} <- AliRealtimeTTS.start_link(self(), %{id: id, sample_rate: @tts_sample_rate}) do
             Logger.info("#{inspect(self())} - ASR provider started successfully, PID: #{inspect(asr_pid)}")
             {_, opus_encoder_state} = RtpOpusEncoder.handle_setup(nil, %{
                 application: :audio,
@@ -196,7 +197,7 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
                 input_stream_format: %RawAudio{
                   channels: 1,
                   sample_format: :s16le,
-                  sample_rate: 8_000
+                  sample_rate: @tts_sample_rate
                 },
                 current_pts: nil,
                 native: nil,
@@ -207,8 +208,9 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
               srtp: false
             })
             pad = Pad.ref(:input, id)
-            ctx = %{pads: %{pad => %{options: %{ssrc: id, encoding: nil, payload_type: 111, clock_rate: @clock_rate}}}}
-            {[], rtp_muxer_state} = Membrane.RTP.Muxer.handle_stream_format(pad, %{payload_format: :opus}, ctx, rtp_muxer_state)
+            ctx = %{pads: %{pad => %{options: %{ssrc: :random, encoding: :opus, payload_type: 111, clock_rate: @tts_sample_rate}}}}
+            {_, rtp_muxer_state} = Membrane.RTP.Muxer.handle_stream_format(pad, %{payload_format: Opus}, ctx, rtp_muxer_state)
+            IO.puts("init rtp_muxer_state: #{inspect(rtp_muxer_state)}, pad: #{inspect(pad)}")
             {:noreply, assign(socket, %{
               in_audio_track_id: id,
               asr_handler: asr_pid,
@@ -234,12 +236,13 @@ defmodule EmqxMediaProxyWeb.WebRTCRoom do
   end
 
   defp handle_webrtc_msg({:rtp, id, nil, packet}, %{assigns: %{in_audio_track_id: id, asr_handler: asr_pid, opus_decoder_state: opus_decoder_state}} = socket) do
-    #Logger.info("Received RTP packet for audio track #{id}, sending to ASR handler, packet: #{inspect(packet)}")
+    #Logger.info("Received RTP packet for audio track #{id}, sending to ASR handler, packet: #{inspect(Map.delete(packet, :payload))}")
     {actions, opus_decoder_state} = Opus.Decoder.handle_buffer(:input, %Buffer{payload: packet.payload}, nil, opus_decoder_state)
     case actions[:buffer] do
       nil -> :ok
       {:output, %Buffer{payload: payload}} ->
         AliRealtimeASR.recognize(asr_pid, payload)
+        #Logger.info("Sent audio packet to ASR handler, packet: #{inspect(packet)}")
         #PeerConnection.send_rtp(socket.assigns.peer_connection, socket.assigns.out_audio_track_id, packet)
     end
     {:noreply, assign(socket, [opus_decoder_state: opus_decoder_state])}

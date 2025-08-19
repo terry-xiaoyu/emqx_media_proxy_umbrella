@@ -88,7 +88,7 @@ defmodule EmqxRealtimeApi.AliRealtimeTTS do
             "text_type" => "PlainText",
             "voice" => "longxiaochun_v2",
             "format" => "pcm",
-            "sample_rate" => 8_000,
+            "sample_rate" => Map.get(opts, :sample_rate, 8_000),
             "volume" => 50,
             "rate" => 1,
             "pitch" => 1
