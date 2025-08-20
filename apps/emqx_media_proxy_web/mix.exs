@@ -23,7 +23,7 @@ defmodule EmqxMediaProxyWeb.MixProject do
   def application do
     [
       mod: {EmqxMediaProxyWeb.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :membrane_webrtc_plugin]
     ]
   end
 
@@ -36,7 +36,19 @@ defmodule EmqxMediaProxyWeb.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:ex_webrtc, "~> 0.15", override: true},
+      {:membrane_ffmpeg_swresample_plugin, "~> 0.20"},
+      {:membrane_mp3_mad_plugin, "~> 0.18"},
+      {:membrane_rtp_plugin, "~> 0.31"},
+      {:emqx_media_proxy, in_umbrella: true},
+      {:emqx_realtime_api, in_umbrella: true},
+      {:membrane_matroska_plugin, "~> 0.6"},
+      {:emqx_media_rtp, in_umbrella: true},
+      {:membrane_core, "~> 1.2"},
+      {:membrane_opus_plugin, "~> 0.20"},
+      {:membrane_rtp_opus_plugin, "~> 0.10"},
+      {:xav, "~> 0.11.0"},
+      {:bumblebee, "~> 0.6.2"},
+      {:membrane_webrtc_plugin, "~> 0.25"},
       {:phoenix, "~> 1.7.21"},
       {:phoenix_ecto, "~> 4.5"},
       {:phoenix_html, "~> 4.1"},
@@ -56,14 +68,6 @@ defmodule EmqxMediaProxyWeb.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.26"},
-      {:emqx_media_proxy, in_umbrella: true},
-      {:emqx_realtime_api, in_umbrella: true},
-      {:emqx_media_rtp, in_umbrella: true},
-      {:membrane_core, "~> 1.2"},
-      {:membrane_opus_plugin, "~> 0.20"},
-      {:membrane_rtp_opus_plugin, "~> 0.10"},
-      {:xav, "~> 0.11.0"},
-      {:bumblebee, "~> 0.6.2"},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"}
     ]

@@ -194,7 +194,7 @@ defmodule EmqxMediaRtp.RtpOpusEncoder do
   end
 
   defp set_current_pts(%{current_pts: nil} = state, nil) do
-    %{state | current_pts: 0}
+    %{state | current_pts: Time.vm_time()}
   end
 
   defp set_current_pts(state, nil) do

@@ -28,7 +28,9 @@ defmodule EmqxMediaProxy.Umbrella.MixProject do
       # Required to run "mix format" on ~H/.heex files from the umbrella root
       {:phoenix_live_view, ">= 0.0.0"},
       {:observer_cli, "~> 1.8"},
-      {:ex_dtls, git: "https://github.com/terry-xiaoyu/ex_dtls.git", branch: "master", override: true}
+      {:ex_dtls, git: "https://github.com/terry-xiaoyu/ex_dtls.git", branch: "master", override: true},
+      {:membrane_rtp_plugin, "~> 0.31", override: true},
+      {:ex_webrtc, "~> 0.15", override: true}
     ]
   end
 

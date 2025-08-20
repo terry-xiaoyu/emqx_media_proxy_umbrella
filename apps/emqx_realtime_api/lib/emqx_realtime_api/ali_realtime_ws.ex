@@ -20,7 +20,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
   @callback rws_handle_cast(any(), state()) :: state()
   @callback rws_handle_info(any(), state()) :: state()
   @callback rws_handle_outputs(state(), list(output())) :: state()
-  @callback rws_handle_bin_outputs(state(), binary()) :: state()
+  @callback rws_handle_bin_outputs(state(),[binary()]) :: state()
   @callback rws_make_run_task_cmd(task_id(), provider_opts()) :: binary()
   @callback rws_make_continue_task_cmd(input :: any(), task_id(), provider_opts()) :: binary()
   @callback rws_make_finish_task_cmd(task_id(), state()) :: binary()
@@ -57,7 +57,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
       mod: mod,
       input_type: input_type,
       input_buf: [],
-      output_bin_buf: <<>>,
+      output_bin_buf: [],
       output_text_buf: [],
       ws_data_buf: <<>>,
       opts: opts,
@@ -162,7 +162,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
   def handle_info({closed, _}, state) when closed == :ssl_closed or closed == :tcp_closed do
     Logger.warning("#{state.mod} - Connection closed")
     state = schedule_reconnect(state)
-    {:noreply, %{state | task_status: :idle, task_id: nil}}
+    {:noreply, %{state | task_status: :idle}}
   end
 
   def handle_info(
@@ -181,10 +181,10 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
         |> mod.rws_handle_outputs(Enum.reverse(outputs))
         |> mod.rws_handle_bin_outputs(state.output_bin_buf)
       if errs == [] do
-          {:noreply, %{state | output_text_buf: [], output_bin_buf: <<>>, ws_data_buf: <<>>}}
+          {:noreply, %{state | output_text_buf: [], output_bin_buf: [], ws_data_buf: <<>>}}
       else
           Logger.error("#{mod} - Service errors: #{inspect(errs)}")
-          {:stop, {:shutdown, errs}, %{state | output_text_buf: [], output_bin_buf: <<>>, ws_data_buf: <<>>}}
+          {:stop, {:shutdown, errs}, %{state | output_text_buf: [], output_bin_buf: [], ws_data_buf: <<>>}}
       end
     else
       {:ok, conn, [{:status, ^ref, status}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} ->
@@ -287,12 +287,12 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
         {:ok, %{state | task_status: :connected}}
       {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id, "error_code" => "ResponseTimeout", "error_message" => error_message}}} when nil_equal(task_id0, task_id) ->
         Logger.info("#{mod} - Task timed out with ID: #{task_id}, error: #{inspect(error_message)}")
-        {:ok, %{state| task_status: :connected, task_id: nil}}
+        {:ok, %{state| task_status: :connected}}
       {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id} = header}} when nil_equal(task_id0, task_id) ->
         error_code = Map.get(header, "error_code", nil)
         error_message = Map.get(header, "error_message", nil)
         Logger.error("#{mod} - Task failed with error code #{error_code}: #{error_message}")
-        {:error, :task_failed, %{state| task_status: :connected, task_id: nil}}
+        {:error, :task_failed, %{state| task_status: :connected}}
       {:ok, %{"header" => %{"event" => "result-generated"}} = cmd} ->
         if payload = cmd["payload"] do
           output = payload["output"]
@@ -302,9 +302,9 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
           Logger.warning("#{mod} - Result generated but no payload found")
           {:ok, state}
         end
-      {:ok, %{"header" => %{"task_id" => task_id} = header}} when task_id0 and task_id != task_id0 ->
+      {:ok, %{"header" => %{"task_id" => task_id} = header}} when task_id != task_id0 ->
         Logger.error("#{mod} - Received unknown task, current task_id: #{task_id0}, header: #{inspect(header)}")
-        {:error, :task_failed, %{state| task_status: :connected, task_id: nil}}
+        {:error, :task_failed, %{state| task_status: :connected}}
       {:ok, invalid_cmd} ->
         Logger.error("#{mod} - Received invalid command: #{inspect(invalid_cmd)}")
         {:ok, state}
@@ -321,7 +321,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
 
       {:binary, binary}, %{output_bin_buf: output_bin_buf} = state_acc ->
         #IO.puts("Received binary frame of size: #{byte_size(binary)}")
-        %{state_acc | output_bin_buf: <<output_bin_buf::binary, binary::binary>>}
+        %{state_acc | output_bin_buf: output_bin_buf ++ [binary]}
 
       {:ping, _}, acc ->
         acc

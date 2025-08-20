@@ -4,6 +4,7 @@ defmodule EmqxMediaProxyWeb.Application do
   @moduledoc false
 
   use Application
+  alias EmqxMediaProxyWeb.WebrtcPipeline
 
   @impl true
   def start(_type, _args) do
@@ -12,7 +13,9 @@ defmodule EmqxMediaProxyWeb.Application do
       # Start a worker by calling: EmqxMediaProxyWeb.Worker.start_link(arg)
       # {EmqxMediaProxyWeb.Worker, arg},
       # Start to serve requests, typically the last entry
-      EmqxMediaProxyWeb.Endpoint
+      EmqxMediaProxyWeb.Endpoint,
+      {DynamicSupervisor, name: EmqxMediaProxyWeb.DynSup, strategy: :one_for_one},
+      {WebrtcPipeline, []}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
