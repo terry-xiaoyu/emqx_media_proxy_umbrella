@@ -91,16 +91,16 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
     with {:ok, ws, data} <- Mint.WebSocket.encode(ws, {:text, run_task_cmd}),
          {:ok, conn} <- Mint.WebSocket.stream_request_body(conn, ref, data) do
       Logger.info("#{mod} - Sent task-run command with ID: #{task_id}")
-      {:ok, %{state | conn: conn, ws: ws, task_id: task_id, task_status: :started}}
+      {:ok, %{state | conn: conn, ws: ws, task_id: task_id, task_status: :waiting_resp}}
     end
   end
 
   @impl true
-  def handle_call(:send_finish_task_cmd, _from, %{task_status: :started, task_id: task_id, mod: mod, input_buf: input_buf, ws_ref: ref, input_type: input_type} = state) do
+  def handle_call(:send_finish_task_cmd, _from, %{task_status: :ready, task_id: task_id, mod: mod, input_buf: input_buf, ws_ref: ref, input_type: input_type} = state) do
     finish_cmd = mod.rws_make_finish_task_cmd(task_id, state)
     with {:ok, conn, ws} <- do_handle_input(input_buf, state.conn, state.ws, ref, input_type, <<>>),
          {:ok, conn, ws} <- do_handle_input([finish_cmd], conn, ws, ref, input_type, <<>>) do
-      {:reply, :ok, %{state | conn: conn, ws: ws, task_status: :connected, input_buf: []}}
+      {:reply, :ok, %{state | conn: conn, ws: ws, task_status: :waiting_resp, input_buf: []}}
     end
   end
 
@@ -114,7 +114,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
     handle_input(aggreate_input(state, request))
   end
 
-  def handle_cast({:input, _} = request, %{task_status: :started} = state) do
+  def handle_cast({:input, _} = request, %{task_status: :ready} = state) do
     handle_input(aggreate_input(state, request))
   end
 
@@ -188,7 +188,9 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
       end
     else
       {:ok, conn, [{:status, ^ref, status}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} ->
-        IO.puts("WebSocket upgrade response received with status #{status}")
+        true = is_integer(status)
+        true = (status >= 100 and status < 300)
+        Logger.info("WebSocket upgrade response received with status #{status}")
         {:ok, conn, ws} = Mint.WebSocket.new(conn, ref, status, resp_headers)
         case state.input_buf do
           [] ->
@@ -206,6 +208,10 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
 
   def handle_info(info, %{mod: mod} = state) do
     {:noreply, mod.rws_handle_info(info, state)}
+  end
+
+  defp buffer_input(state, <<>>) do
+    state
   end
 
   defp buffer_input(%{input_buf: input_buf, mod: mod, task_id: task_id, opts: opts} = state, input_frag) do
@@ -281,12 +287,16 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
     case Jason.decode(txt) do
       {:ok, %{"header" => %{"event" => "task-started", "task_id" => task_id}}} when nil_equal(task_id0, task_id) ->
         Logger.info("#{mod} - Task started with ID: #{task_id}")
-        {:ok, %{state | task_status: :started}}
+        GenServer.cast(self(), {:input, <<>>})
+        {:ok, %{state | task_status: :ready}}
       {:ok, %{"header" => %{"event" => "task-finished", "task_id" => task_id}}} when nil_equal(task_id0, task_id) ->
         Logger.warning("#{mod} - Task finished with ID: #{task_id}")
         {:ok, %{state | task_status: :connected}}
-      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id, "error_code" => "ResponseTimeout", "error_message" => error_message}}} when nil_equal(task_id0, task_id) ->
-        Logger.info("#{mod} - Task timed out with ID: #{task_id}, error: #{inspect(error_message)}")
+      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id, "error_code" => "ResponseTimeout", "error_message" => err_msg}}} when nil_equal(task_id0, task_id) ->
+        Logger.warning("#{mod} - Task timed out with ID: #{task_id}, error: #{inspect(err_msg)}")
+        {:ok, %{state| task_status: :connected}}
+      {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id, "error_code" => "InvalidParameter", "error_message" => "request timeout" <> _ = err_msg}}} when nil_equal(task_id0, task_id) ->
+        Logger.warning("#{mod} - Task timed out with ID: #{task_id}, error: #{inspect(err_msg)}")
         {:ok, %{state| task_status: :connected}}
       {:ok, %{"header" => %{"event" => "task-failed", "task_id" => task_id} = header}} when nil_equal(task_id0, task_id) ->
         error_code = Map.get(header, "error_code", nil)
@@ -303,11 +313,11 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
           {:ok, state}
         end
       {:ok, %{"header" => %{"task_id" => task_id} = header}} when task_id != task_id0 ->
-        Logger.error("#{mod} - Received unknown task, current task_id: #{task_id0}, header: #{inspect(header)}")
-        {:error, :task_failed, %{state| task_status: :connected}}
+        Logger.error("#{mod} - Received command on another task: #{task_id}, current task_id: #{task_id0}, header: #{inspect(header)}")
+        {:error, :task_failed, state}
       {:ok, invalid_cmd} ->
         Logger.error("#{mod} - Received invalid command: #{inspect(invalid_cmd)}")
-        {:ok, state}
+        {:error, :invalide_cmd, state}
       {:error, reason} ->
         Logger.error("#{mod} - Failed to decode response: #{inspect(reason)}, response: #{txt}")
         {:error, reason, state}
@@ -331,7 +341,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
 
       {:close, code, reason}, state_acc ->
         Logger.warning("#{state.mod} - WebSocket closed with code #{code} and reason: #{inspect(reason)}")
-        schedule_reconnect(state_acc)
+        schedule_reconnect(%{state_acc | task_status: :idle})
 
       other, acc ->
         Logger.error("#{state.mod} - Received unknown frame type, ignoring: #{inspect(other)}")
@@ -343,7 +353,7 @@ defmodule EmqxRealtimeApi.AliRealtimeWs do
     with  {:ok, conn} <- Mint.HTTP.connect(http_scheme(parsed_uri.scheme), parsed_uri.host, parsed_uri.port, [protocols: [:http1]]),
           IO.puts("Connected to service at #{parsed_uri.host}:#{parsed_uri.port}"),
           {:ok, conn, ref} <- Mint.WebSocket.upgrade(:wss, conn, parsed_uri.path, ws_headers(api_key)) do
-        {:ok, Map.merge(state, %{conn: conn, ws: nil, ws_ref: ref, task_id: nil, task_status: :upgrading})}
+        {:ok, Map.merge(state, %{conn: conn, ws: nil, ws_ref: ref, task_id: nil, task_status: :waiting_resp})}
       else
         error ->
           Logger.error("#{state.mod} - Failed to connect to service: #{inspect(error)}")

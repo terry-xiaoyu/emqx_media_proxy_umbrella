@@ -73,7 +73,7 @@ defmodule EmqxMediaRtp.RtpPipeline do
       })
       |> child({:audio_payloader, ssrc}, RTP.Opus.Payloader)
       |> child({:audio_rtp_muxer, ssrc}, %RTP.Muxer{srtp: srtp})
-      #|> child({:audio_realtimer, ssrc}, Membrane.Realtimer)
+      |> child({:audio_realtimer, ssrc}, Membrane.Realtimer)
       |> child({:audio_sink, ssrc}, %UDP.Sink{
         destination_address: @local_ip,
         destination_port_no: audio_port + 1

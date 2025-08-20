@@ -59,12 +59,14 @@ defmodule EmqxRealtimeApi.AliRealtimeTTS do
   end
 
   def rws_handle_bin_outputs(%{opts: opts} = state, bin_outputs) do
+    #send(opts.parent, {:tts_response, :erlang.iolist_to_binary(bin_outputs)})
     for bin <- bin_outputs, do: send(opts.parent, {:tts_response, bin})
     state
   end
 
   @impl AliRealtimeWs
   def rws_make_run_task_cmd(task_id, opts) do
+    Logger.info("Making run task command for TTS with task_id: #{task_id}, opts: #{inspect(opts)}")
     ## GStreamer commands to test TTS output:
     ## [MP3]:
     ##  gst-launch-1.0 udpsrc port=5003 ! mpegaudioparse ! mpg123audiodec ! audioconvert ! audioresample ! autoaudiosink
@@ -72,7 +74,6 @@ defmodule EmqxRealtimeApi.AliRealtimeTTS do
     ##  gst-launch-1.0 udpsrc port=5003 caps='audio/x-raw,format=S16LE,channels=1,rate=22050' ! autoaudiosink
     ## [Receive MP3 and convert to Opus]:
     ##  gst-launch-1.0 -v udpsrc port=5003 caps="application/x-rtp,media=audio,clock-rate=48000,encoding-name=OPUS" ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! osxaudiosink
-    IO.puts("Making run task command for TTS with task_id: #{task_id}, opts: #{inspect(opts)}")
     Jason.encode!(
       %{
         "header" => %{

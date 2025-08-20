@@ -2,7 +2,17 @@ import { Socket } from "phoenix";
 
 async function startEgressConnection(channel, topic) {
   const pcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-  const mediaConstraints = { video: true, audio: true };
+  const mediaConstraints = {
+    video: true,
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 48000,
+      sampleSize: 16,
+      channelCount: 2
+    }
+  };
 
   const connStatus = document.getElementById("status");
   const localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);

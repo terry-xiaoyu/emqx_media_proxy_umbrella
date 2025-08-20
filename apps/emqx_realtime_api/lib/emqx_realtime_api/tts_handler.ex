@@ -33,8 +33,8 @@ defmodule EmqxRealtimeApi.TtsHandler do
   @impl true
   def handle_init(ctx, opts) do
     Logger.info("Initializing TTS Handler with options: #{inspect(opts)}, context: #{inspect(ctx)}")
-    #:erlang.process_flag(:trap_exit, true)
-    {[], %{opts: opts, provider_pid: nil, ssrc: nil, provider: opts.provider}}
+    :erlang.process_flag(:trap_exit, true)
+    {[], %{opts: opts, provider_pid: nil, ssrc: nil, provider: opts.provider, start_provider: nil}}
   end
 
   @impl true
@@ -46,11 +46,13 @@ defmodule EmqxRealtimeApi.TtsHandler do
   def handle_setup(_ctx, %{opts: opts} = state) do
     provider = opts.provider
     provider_opts = opts.provider_opts
-
-    case provider.start_link(self(), provider_opts) do
+    start_provider = fn ->
+      provider.start_link(self(), provider_opts)
+    end
+    case start_provider.() do
       {:ok, pid} ->
         Logger.debug("TTS provider started successfully: #{inspect(provider)}, PID: #{inspect(pid)}")
-        {[], %{state | provider_pid: pid}}
+        {[], %{state | provider_pid: pid, start_provider: start_provider}}
 
       {:error, reason} ->
         Logger.error("Failed to start TTS provider: #{inspect(reason)}")
@@ -59,9 +61,9 @@ defmodule EmqxRealtimeApi.TtsHandler do
   end
 
   @impl true
-  def handle_pad_added({Pad, :input, ssrc}, _ctx, state) do
-    Logger.info("TTS Pad added for SSRC: #{ssrc}")
-    {[], maybe_save_ssrc(state, ssrc)}
+  def handle_pad_added({Pad, :input, id}, _ctx, state) do
+    Logger.info("TTS Pad added for: #{inspect(id)}")
+    {[], state}
   end
 
   @impl true
@@ -78,8 +80,8 @@ defmodule EmqxRealtimeApi.TtsHandler do
 
   @impl true
   def handle_end_of_stream(_, _ctx, state) do
-    Logger.debug("RTP stream terminated, stopping TTS Handler")
-    {[terminate: :normal], state}
+    Logger.debug("RTP stream terminated")
+    {[], state}
   end
 
   @impl true
@@ -88,19 +90,19 @@ defmodule EmqxRealtimeApi.TtsHandler do
     {[buffer: {:output, %Buffer{payload: bin_outputs}}], state}
   end
 
+  def handle_info({:EXIT, pid, reason}, _ctx, %{provider_pid: pid, start_provider: start_provider} = state) do
+    Logger.error("TTS provider exited with reason: #{inspect(reason)}")
+    case start_provider.() do
+      {:ok, pid} ->
+        {[], %{state | provider_pid: pid}}
+      {:error, reason} ->
+        Logger.error("Failed to start TTS provider: #{inspect(reason)}")
+        {[terminate: reason], state}
+    end
+  end
+
   def handle_info(info, _ctx, state) do
     Logger.warning("Unhandled info message in TTS Handler: #{inspect(info)}")
     {[], state}
-  end
-
-  defp maybe_save_ssrc(state, ssrc) do
-    case state do
-      %{ssrc: nil} ->
-        state |> Map.put(:ssrc, ssrc)
-      %{ssrc: ^ssrc} ->
-        state
-      %{ssrc: oldssr} ->
-        throw("SSRC mismatch: expected #{oldssr}, got #{ssrc}")
-    end
   end
 end

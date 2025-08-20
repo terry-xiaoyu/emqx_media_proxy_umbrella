@@ -48,7 +48,7 @@ defmodule EmqxMediaProxyWeb.MixProject do
       {:membrane_rtp_opus_plugin, "~> 0.10"},
       {:xav, "~> 0.11.0"},
       {:bumblebee, "~> 0.6.2"},
-      {:membrane_webrtc_plugin, "~> 0.25"},
+      {:membrane_webrtc_plugin, git: "https://github.com/terry-xiaoyu/membrane_webrtc_plugin.git", branch: "master"},
       {:phoenix, "~> 1.7.21"},
       {:phoenix_ecto, "~> 4.5"},
       {:phoenix_html, "~> 4.1"},

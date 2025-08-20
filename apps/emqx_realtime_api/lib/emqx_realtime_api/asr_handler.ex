@@ -53,9 +53,9 @@ defmodule EmqxRealtimeApi.AsrHandler do
   end
 
   @impl true
-  def handle_pad_added({Pad, :input, ssrc}, _ctx, state) do
-    Logger.info("ASR Pad added for SSRC: #{ssrc}")
-    {[], maybe_save_ssrc(state, ssrc)}
+  def handle_pad_added({Pad, :input, id}, _ctx, state) do
+    Logger.info("ASR Pad added for: #{inspect(id)}")
+    {[], state}
   end
 
   @impl true
@@ -69,8 +69,8 @@ defmodule EmqxRealtimeApi.AsrHandler do
 
   @impl true
   def handle_end_of_stream(_, _ctx, state) do
-    IO.puts("RTP stream terminated, stopping ASR Handler")
-    {[terminate: :normal], state}
+    IO.puts("RTP stream terminated")
+    {[], state}
   end
 
   @impl true
